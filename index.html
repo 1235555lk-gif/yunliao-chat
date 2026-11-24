@@ -420,6 +420,26 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .note-sign { font-size: 11px; color: rgba(244,241,232,0.55); text-align: right; }
 .right-foot { color: var(--muted); font-size: 10px; display: flex; gap: 6px; padding: 0 4px; }
 
+.settings-card { width: min(100%, 680px); }
+.settings-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.settings-section-head > span:first-child { font-size: 13px; font-weight: 600; }
+.settings-section-head .muted-line { font-size: 11px; }
+.settings-role-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.settings-role { display: flex; gap: 10px; align-items: flex-start; background: var(--surface); padding: 11px 12px; }
+.settings-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+.settings-role-main { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.settings-role-main strong { font-size: 13px; }
+.settings-perms { width: 100%; color: var(--muted); font-size: 11px; }
+.settings-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 3px 0; }
+.settings-checks .check-line { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-soft); }
+.settings-checks input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 4px; accent-color: var(--accent); flex: none; }
+.settings-member-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.settings-member { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); padding: 10px 12px; }
+.settings-member strong { font-size: 13px; }
+.settings-member-meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.settings-member select { width: 140px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-soft); padding: 7px 8px; font-size: 12px; }
+@media (max-width: 640px) { .settings-checks { grid-template-columns: 1fr; } .settings-member select { width: 120px; } }
+
 /* Modals */
 .modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 22px; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(23, 26, 23, 0.36); backdrop-filter: blur(4px); }
@@ -738,6 +758,22 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
         <div id="channel-error" class="form-error hidden"></div>
         <button class="primary-btn full" type="submit">提交频道审核</button>
       </form>
+    </div>
+  </div>
+
+  <div id="channel-settings-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop" data-close="channel-settings"></div>
+    <div class="modal-card settings-card">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">频道设置</div>
+          <div class="modal-sub">频道主可以给自己的频道设置角色、徽章和成员权限</div>
+        </div>
+        <button class="icon-btn" data-close="channel-settings" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="channel-settings-body"></div>
     </div>
   </div>
 
@@ -1292,6 +1328,7 @@ window.FORUM_CONFIG = {
     $('#page').innerHTML = `${pageHead('CHANNEL / 频道', channel.name, channel.description || '这个频道还没有写简介。', `
       <button class="ghost-btn" data-route="channels" type="button">全部频道</button>
       ${owner ? '<span class="badge owner">频道主</span>' : joined ? `<span class="badge official">${safe(joined)}</span>` : channel.join_policy === 'invite' ? '<span class="badge muted">仅邀请</span>' : `<button class="primary-btn" data-action="join-channel" data-id="${safe(channel.id)}" type="button">${channel.join_policy === 'approval' ? '申请加入' : '加入频道'}</button>`}
+      ${owner ? '<button class="ghost-btn" data-action="channel-settings" type="button">频道设置</button>' : ''}
       ${canPost ? `<button class="ghost-btn" data-action="compose-channel" data-id="${safe(channel.id)}" data-name="${safe(channel.name)}" type="button">发帖</button>` : ''}`)}
       <div style="display:flex;gap:12px;align-items:center;padding:18px 24px;border-bottom:1px solid var(--line)">
         <div class="channel-avatar">${safe(channel.name.slice(0,1))}</div>
@@ -1300,6 +1337,87 @@ window.FORUM_CONFIG = {
       </div>
       ${channel.status === 'pending' ? '<div style="padding:22px 24px;color:var(--amber);font-size:13px">这个频道还在等待站主审核，通过后才会公开。</div>'
         : `<div class="feed">${posts.length ? posts.map((p) => postHtml(p)).join('') : empty('风', '频道里还没有公开内容', canPost ? '写第一条吧。' : '加入频道后可以参与讨论。')}</div>`}`;
+  }
+
+  const CHANNEL_PERMISSIONS = [
+    ['channel.post', '在频道内发帖'],
+    ['channel.comment', '在频道内评论'],
+    ['channel.member.manage', '管理频道成员'],
+    ['channel.content.review', '审核频道内容']
+  ];
+
+  async function openChannelSettings() {
+    if (!state.channel) return;
+    openModal('channel-settings');
+    await renderChannelSettings();
+  }
+
+  async function renderChannelSettings() {
+    const channel = state.channel;
+    if (!channel) return;
+    const body = $('#channel-settings-body');
+    body.innerHTML = '<div class="muted-line" style="padding:10px 0 18px">正在读取频道角色…</div>';
+    const [rolesRes, membersRes] = await Promise.all([
+      sb.from('channel_roles').select('id,name,badge_text,color,permissions,created_at').eq('channel_id', channel.id).order('created_at', { ascending: true }),
+      sb.from('channel_members').select('user_id,role_id,status,joined_at').eq('channel_id', channel.id).order('joined_at', { ascending: true })
+    ]);
+    const roles = rolesRes.data || [];
+    const members = membersRes.data || [];
+    const ids = members.map((m) => m.user_id).filter(Boolean);
+    const { data: profiles } = ids.length ? await sb.from('public_profiles').select('id,username,site_role_id').in('id', ids) : { data: [] };
+    const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+    const permLabels = new Map(CHANNEL_PERMISSIONS);
+    const roleOptions = roles.map((r) => `<option value="${safe(r.id)}">${safe(r.name)}</option>`).join('');
+    body.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-head"><span>频道角色</span><span class="muted-line">${roles.length} 个</span></div>
+        <div class="settings-role-list">
+          ${roles.length ? roles.map((r) => `<div class="settings-role"><span class="settings-dot" style="background:${safe(r.color)}"></span><div class="settings-role-main"><strong>${safe(r.name)}</strong><span class="badge official" style="--badge:${safe(r.color)}">${safe(r.badge_text)}</span><div class="settings-perms">${safe((r.permissions || []).map((p) => permLabels.get(p) || p).join(' · ') || '没有额外权限')}</div></div></div>`).join('') : '<div class="muted-line" style="padding:9px 0 15px">还没有自定义角色。频道主可以添加一个。</div>'}
+        </div>
+      </div>
+      <form id="channel-role-form" class="stack-form" style="padding:16px 0 20px;border-bottom:1px solid var(--line)">
+        <div class="settings-section-head"><span>新建频道角色</span><span class="muted-line">只在这个频道里显示</span></div>
+        <div class="field-row">
+          <label class="field"><span>角色名称<em>*</em></span><input id="channel-role-name" maxlength="20" placeholder="例如：常驻、版务" required /></label>
+          <label class="field"><span>徽章文案<em>*</em></span><input id="channel-role-badge" maxlength="24" placeholder="例如：梧桐树下 · 常驻" required /></label>
+        </div>
+        <label class="field"><span>徽章颜色</span><input id="channel-role-color" type="color" value="#266552" style="height:42px;padding:4px" /></label>
+        <div class="field"><span>权限</span><div class="settings-checks">${CHANNEL_PERMISSIONS.map(([key,label]) => `<label class="check-line"><input type="checkbox" name="channel-perm" value="${key}" /> <span>${label}</span></label>`).join('')}</div></div>
+        <div><button class="primary-btn" type="submit">创建频道角色</button></div>
+      </form>
+      <div class="settings-section" style="padding-top:18px">
+        <div class="settings-section-head"><span>频道成员</span><span class="muted-line">${members.length} 人</span></div>
+        <div class="settings-member-list">
+          ${members.length ? members.map((m) => {
+            const p = profileMap.get(m.user_id) || { username: '未知用户' };
+            return `<div class="settings-member"><div><strong>${safe(p.username)}</strong><div class="settings-member-meta">${m.status === 'active' ? '正常' : m.status === 'pending' ? '待审核' : m.status === 'muted' ? '禁言' : '已封禁'} · ${safe(timeAgo(m.joined_at))}</div></div><select data-channel-role-assign data-user-id="${safe(m.user_id)}"><option value="">无角色</option>${roleOptions.replace(`value="${safe(m.role_id || '')}"`, `value="${safe(m.role_id || '')}" selected`)}</select></div>`;
+          }).join('') : '<div class="muted-line" style="padding:9px 0 5px">还没有成员。公开频道邀请用户加入后，会出现在这里。</div>'}
+        </div>
+      </div>`;
+    $('#channel-role-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = String($('#channel-role-name')?.value || '').trim();
+      const badge = String($('#channel-role-badge')?.value || '').trim();
+      const color = String($('#channel-role-color')?.value || '#266552');
+      if (!name || !badge) return toast('角色名称和徽章文案都要填。', 'error');
+      const permissions = $$('input[name="channel-perm"]:checked').map((el) => el.value);
+      const btn = event.submitter;
+      if (btn) { btn.disabled = true; btn.textContent = '创建中…'; }
+      const { error } = await sb.from('channel_roles').insert({
+        channel_id: channel.id, name, badge_text: badge, color, permissions, created_by: state.me.id
+      });
+      if (btn) { btn.disabled = false; btn.textContent = '创建频道角色'; }
+      if (error) return toast(`创建失败：${error.message}`.slice(0, 160), 'error');
+      toast('频道角色已创建。', 'good');
+      await renderChannelSettings();
+    });
+    $$('[data-channel-role-assign]').forEach((select) => {
+      select.addEventListener('change', async () => {
+        const { error } = await sb.from('channel_members').update({ role_id: select.value || null }).eq('channel_id', channel.id).eq('user_id', select.dataset.userId);
+        if (error) return toast(`角色分配失败：${error.message}`.slice(0, 160), 'error');
+        toast('成员角色已更新。', 'good');
+      });
+    });
   }
 
   async function renderPost(id) {
@@ -1553,6 +1671,7 @@ window.FORUM_CONFIG = {
       else if (action === 'open-post') { event.preventDefault(); navigate(`post/${actionEl.dataset.id}`); }
       else if (action === 'open-channel') { event.preventDefault(); navigate(`channel/${encodeURIComponent(actionEl.dataset.slug)}`); }
       else if (action === 'join-channel') { event.preventDefault(); event.stopPropagation(); joinChannel(actionEl.dataset.id); }
+      else if (action === 'channel-settings') { event.preventDefault(); openChannelSettings(); }
       else if (action === 'compose-lobby') { event.preventDefault(); openCompose('lobby'); }
       else if (action === 'compose-channel') { event.preventDefault(); openCompose('channel', { id: actionEl.dataset.id, name: actionEl.dataset.name }); }
       else if (action === 'create-channel') { event.preventDefault(); openModal('channel'); }
